@@ -3,5 +3,5 @@ services:
     name: polymarket-crypto-assistant
     runtime: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "uvicorn src.web.server:app --host 0.0.0.0 --port $PORT"
+    startCommand: "cd src && uvicorn web.server:app --host 0.0.0.0 --port $PORT"
     plan: free
