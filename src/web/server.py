@@ -106,27 +106,38 @@ def fetch_pm_market(coin: str, tf: str) -> dict:
     from feeds import _build_slug
 
     slug = _build_slug(coin, tf)
+    print(f"[PM] {coin}/{tf} -> slug: {slug}")
     if not slug:
+        print(f"[PM] {coin}/{tf}: No slug generated")
         return {"pm_up": None, "pm_dn": None}
 
     try:
-        data = http_session.get(
+        resp = http_session.get(
             config.PM_GAMMA,
             params={"slug": slug, "limit": 1},
             timeout=5
-        ).json()
+        )
+        print(f"[PM] {coin}/{tf}: status={resp.status_code}")
+        data = resp.json()
 
-        if not data or data[0].get("ticker") != slug:
+        if not data:
+            print(f"[PM] {coin}/{tf}: Empty response")
+            return {"pm_up": None, "pm_dn": None}
+
+        if data[0].get("ticker") != slug:
+            print(f"[PM] {coin}/{tf}: Ticker mismatch - got '{data[0].get('ticker')}', expected '{slug}'")
             return {"pm_up": None, "pm_dn": None}
 
         market = data[0]["markets"][0]
         outcome_prices = market.get("outcomePrices", [])
+        print(f"[PM] {coin}/{tf}: outcomePrices={outcome_prices}")
 
         if outcome_prices and len(outcome_prices) >= 2:
             return {"pm_up": float(outcome_prices[0]), "pm_dn": float(outcome_prices[1])}
 
         return {"pm_up": None, "pm_dn": None}
-    except Exception:
+    except Exception as e:
+        print(f"[PM] {coin}/{tf}: Exception - {e}")
         return {"pm_up": None, "pm_dn": None}
 
 
@@ -357,6 +368,9 @@ async def health():
 @app.get("/debug")
 async def debug():
     """Debug endpoint to test API connections."""
+    from feeds import _build_slug
+    import json as json_module
+
     results = {}
 
     # Test Binance
@@ -371,17 +385,28 @@ async def debug():
     except Exception as e:
         results["binance_error"] = str(e)
 
-    # Test Polymarket
-    try:
-        resp = http_session.get(
-            config.PM_GAMMA,
-            params={"slug": "btc-updown-15m-0", "limit": 1},
-            timeout=10
-        )
-        results["pm_status"] = resp.status_code
-        results["pm_response"] = resp.text[:500]
-    except Exception as e:
-        results["pm_error"] = str(e)
+    # Test Polymarket with real slug
+    results["pm_tests"] = {}
+    for tf in ["15m", "1h", "4h", "daily"]:
+        slug = _build_slug("BTC", tf)
+        results["pm_tests"][tf] = {"slug": slug}
+        try:
+            resp = http_session.get(
+                config.PM_GAMMA,
+                params={"slug": slug, "limit": 1},
+                timeout=10
+            )
+            results["pm_tests"][tf]["status"] = resp.status_code
+            data = resp.json()
+            results["pm_tests"][tf]["data_length"] = len(data) if isinstance(data, list) else "not a list"
+            if data and isinstance(data, list) and len(data) > 0:
+                results["pm_tests"][tf]["ticker"] = data[0].get("ticker")
+                results["pm_tests"][tf]["ticker_match"] = data[0].get("ticker") == slug
+                if "markets" in data[0] and len(data[0]["markets"]) > 0:
+                    market = data[0]["markets"][0]
+                    results["pm_tests"][tf]["outcomePrices"] = market.get("outcomePrices")
+        except Exception as e:
+            results["pm_tests"][tf]["error"] = str(e)
 
     return results
 
