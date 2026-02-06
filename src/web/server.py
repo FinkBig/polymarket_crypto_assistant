@@ -60,15 +60,15 @@ def fetch_binance_orderbook(symbol: str) -> dict:
         print(f"[Binance OB] {symbol}: status={resp.status_code}")
         data = resp.json()
         if "bids" not in data:
-            print(f"[Binance OB] Error response: {data}")
-            return {"bids": [], "asks": [], "mid": 0, "error": str(data)}
+            print(f"[Binance OB] Error: {data.get('msg', data)}")
+            return {"bids": [], "asks": [], "mid": 0}
         bids = [(float(p), float(q)) for p, q in data["bids"]]
         asks = [(float(p), float(q)) for p, q in data["asks"]]
         mid = (bids[0][0] + asks[0][0]) / 2 if bids and asks else 0
         return {"bids": bids, "asks": asks, "mid": mid}
     except Exception as e:
         print(f"[Binance OB] Exception: {e}")
-        return {"bids": [], "asks": [], "mid": 0, "error": str(e)}
+        return {"bids": [], "asks": [], "mid": 0}
 
 
 def fetch_binance_klines(symbol: str, interval: str, limit: int = 100) -> list:
@@ -77,8 +77,12 @@ def fetch_binance_klines(symbol: str, interval: str, limit: int = 100) -> list:
         resp = http_session.get(
             f"{config.BINANCE_REST}/klines",
             params={"symbol": symbol, "interval": interval, "limit": limit},
-            timeout=5
-        ).json()
+            timeout=10
+        )
+        data = resp.json()
+        if not isinstance(data, list):
+            print(f"[Binance Klines] Error: {data.get('msg', data)}")
+            return []
         return [
             {
                 "t": float(r[0]) / 1000,
@@ -88,9 +92,10 @@ def fetch_binance_klines(symbol: str, interval: str, limit: int = 100) -> list:
                 "c": float(r[4]),
                 "v": float(r[5]),
             }
-            for r in resp
+            for r in data
         ]
-    except Exception:
+    except Exception as e:
+        print(f"[Binance Klines] Exception: {e}")
         return []
 
 
