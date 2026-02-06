@@ -1,6 +1,7 @@
 import sys
 import os
 import asyncio
+import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
@@ -45,8 +46,20 @@ async def display_loop(state: feeds.State, coin: str, tf: str):
 async def main():
     console.print("\n[bold magenta]═══ CRYPTO PREDICTION DASHBOARD ═══[/bold magenta]\n")
 
-    coin = pick("Select coin:", config.COINS)
-    tf   = pick("Select timeframe:", config.TIMEFRAMES)
+    parser = argparse.ArgumentParser(description="Crypto Prediction Dashboard")
+    parser.add_argument("--coin", choices=config.COINS, help="Coin to track")
+    parser.add_argument("--tf", choices=config.TIMEFRAMES, help="Timeframe")
+    args = parser.parse_args()
+
+    if args.coin:
+        coin = args.coin
+    else:
+        coin = pick("Select coin:", config.COINS)
+
+    if args.tf:
+        tf = args.tf
+    else:
+        tf   = pick("Select timeframe:", config.TIMEFRAMES)
 
     console.print(f"\n[bold green]Starting {coin} {tf} …[/bold green]\n")
 

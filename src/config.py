@@ -54,3 +54,6 @@ HA_COUNT   = 8          # Heikin Ashi candles shown
 VP_BINS    = 30         # volume profile price buckets
 VP_SHOW    = 9          # VP rows visible
 REFRESH    = 10         # seconds between dashboard redraws
+
+# ── Web UI ─────────────────────────────────────────────────────
+WEB_PORT   = 8080

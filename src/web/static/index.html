@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polymarket Crypto Assistant</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --green: #3fb950;
+            --green-bg: rgba(63, 185, 80, 0.15);
+            --red: #f85149;
+            --red-bg: rgba(248, 81, 73, 0.15);
+            --yellow: #d29922;
+            --yellow-bg: rgba(210, 153, 34, 0.15);
+            --blue: #58a6ff;
+            --cyan: #39c5cf;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header h1 span {
+            color: var(--text-secondary);
+            font-weight: 400;
+            font-size: 14px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+        }
+
+        .status-dot.disconnected {
+            background: var(--red);
+        }
+
+        .status-dot.connecting {
+            background: var(--yellow);
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+            padding: 12px 24px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab {
+            padding: 8px 20px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .tab:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .tab.active {
+            background: var(--bg-tertiary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .main {
+            padding: 24px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        @media (max-width: 1400px) {
+            .grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge.bullish {
+            background: var(--green-bg);
+            color: var(--green);
+        }
+
+        .badge.bearish {
+            background: var(--red-bg);
+            color: var(--red);
+        }
+
+        .badge.neutral {
+            background: var(--yellow-bg);
+            color: var(--yellow);
+        }
+
+        .score {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .panel-body {
+            padding: 16px;
+        }
+
+        .price-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .price {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .pm-odds {
+            text-align: right;
+            font-size: 13px;
+        }
+
+        .pm-odds .label {
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+
+        .pm-up { color: var(--green); }
+        .pm-dn { color: var(--red); }
+
+        .indicators {
+            display: grid;
+            gap: 10px;
+        }
+
+        .indicator-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .indicator-label {
+            color: var(--text-secondary);
+        }
+
+        .indicator-value {
+            font-weight: 500;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Consolas', monospace;
+        }
+
+        .indicator-value.positive { color: var(--green); }
+        .indicator-value.negative { color: var(--red); }
+        .indicator-value.neutral { color: var(--yellow); }
+        .indicator-value.muted { color: var(--text-muted); }
+
+        .signal-tag {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+
+        .signal-tag.bullish {
+            background: var(--green-bg);
+            color: var(--green);
+        }
+
+        .signal-tag.bearish {
+            background: var(--red-bg);
+            color: var(--red);
+        }
+
+        .score-bar {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .score-bar-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .score-bar-track {
+            height: 6px;
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .score-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .score-bar-fill.positive { background: var(--green); }
+        .score-bar-fill.negative { background: var(--red); }
+        .score-bar-fill.neutral { background: var(--yellow); }
+
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .loading-spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .ha-candles {
+            display: flex;
+            gap: 3px;
+            margin-top: 4px;
+        }
+
+        .ha-candle {
+            width: 8px;
+            height: 12px;
+            border-radius: 2px;
+        }
+
+        .ha-candle.green { background: var(--green); }
+        .ha-candle.red { background: var(--red); }
+
+        .walls-info {
+            display: flex;
+            gap: 12px;
+        }
+
+        .wall-count {
+            font-size: 12px;
+        }
+
+        .wall-count.buy { color: var(--green); }
+        .wall-count.sell { color: var(--red); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>
+            Polymarket Crypto Assistant
+            <span>@SolSt1ne</span>
+        </h1>
+        <div class="status-indicator">
+            <div class="status-dot connecting" id="statusDot"></div>
+            <span id="statusText">Connecting...</span>
+        </div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+        <button class="tab active" data-coin="BTC">BTC</button>
+        <button class="tab" data-coin="ETH">ETH</button>
+        <button class="tab" data-coin="SOL">SOL</button>
+        <button class="tab" data-coin="XRP">XRP</button>
+    </nav>
+
+    <main class="main">
+        <div class="grid" id="grid"></div>
+    </main>
+
+    <script>
+        const COINS = ['BTC', 'ETH', 'SOL', 'XRP'];
+        const TIMEFRAMES = ['15m', '1h', '4h', 'daily'];
+
+        let currentCoin = 'BTC';
+        let data = {};
+        let ws = null;
+        let reconnectTimeout = null;
+
+        function formatPrice(val, decimals = 2) {
+            if (val == null) return '—';
+            if (val >= 1e6) return `$${(val / 1e6).toFixed(2)}M`;
+            return `$${val.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+        }
+
+        function formatNumber(val, decimals = 2) {
+            if (val == null) return '—';
+            return val.toFixed(decimals);
+        }
+
+        function getTrendClass(trend) {
+            if (trend === 'BULLISH') return 'bullish';
+            if (trend === 'BEARISH') return 'bearish';
+            return 'neutral';
+        }
+
+        function getValueClass(val) {
+            if (val == null) return 'muted';
+            if (val > 0) return 'positive';
+            if (val < 0) return 'negative';
+            return 'neutral';
+        }
+
+        function renderPanel(item) {
+            if (item.loading) {
+                return `
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">${item.timeframe}</div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="loading">
+                                <div class="loading-spinner"></div>
+                                Loading data...
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const ind = item.indicators || {};
+            const trendClass = getTrendClass(item.trend);
+            const scorePercent = Math.min(Math.abs(item.score || 0), 10) / 10 * 100;
+            const scoreClass = item.score > 0 ? 'positive' : item.score < 0 ? 'negative' : 'neutral';
+
+            return `
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">
+                            ${item.timeframe}
+                            <span class="badge ${trendClass}">${item.trend || 'NEUTRAL'}</span>
+                        </div>
+                        <span class="score">${item.score >= 0 ? '+' : ''}${item.score || 0}</span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="price-row">
+                            <div class="price">${formatPrice(item.price)}</div>
+                            <div class="pm-odds">
+                                <div class="label">Polymarket</div>
+                                <span class="pm-up">${item.pm_up != null ? item.pm_up.toFixed(3) : '—'}</span>
+                                <span class="pm-dn">${item.pm_dn != null ? item.pm_dn.toFixed(3) : '—'}</span>
+                            </div>
+                        </div>
+                        <div class="indicators">
+                            <div class="indicator-row">
+                                <span class="indicator-label">OBI</span>
+                                <span class="indicator-value ${getValueClass(ind.obi)}">
+                                    ${ind.obi != null ? (ind.obi * 100).toFixed(1) + '%' : '—'}
+                                    ${ind.obi_signal && ind.obi_signal !== 'NEUTRAL' ? `<span class="signal-tag ${ind.obi_signal.toLowerCase()}">${ind.obi_signal}</span>` : ''}
+                                </span>
+                            </div>
+                            <div class="indicator-row">
+                                <span class="indicator-label">RSI(14)</span>
+                                <span class="indicator-value ${ind.rsi_signal === 'OVERBOUGHT' ? 'negative' : ind.rsi_signal === 'OVERSOLD' ? 'positive' : 'muted'}">
+                                    ${formatNumber(ind.rsi, 1)}
+                                    ${ind.rsi_signal ? `<span class="signal-tag ${ind.rsi_signal === 'OVERSOLD' ? 'bullish' : 'bearish'}">${ind.rsi_signal}</span>` : ''}
+                                </span>
+                            </div>
+                            <div class="indicator-row">
+                                <span class="indicator-label">MACD</span>
+                                <span class="indicator-value ${getValueClass(ind.macd_hist)}">
+                                    ${ind.macd_cross ? `<span class="signal-tag ${ind.macd_cross}">${ind.macd_cross}</span>` : '—'}
+                                </span>
+                            </div>
+                            <div class="indicator-row">
+                                <span class="indicator-label">EMA Cross</span>
+                                <span class="indicator-value ${ind.ema_cross === 'golden' ? 'positive' : ind.ema_cross === 'death' ? 'negative' : 'muted'}">
+                                    ${ind.ema_cross ? `<span class="signal-tag ${ind.ema_cross === 'golden' ? 'bullish' : 'bearish'}">${ind.ema_cross}</span>` : '—'}
+                                </span>
+                            </div>
+                            <div class="indicator-row">
+                                <span class="indicator-label">VWAP</span>
+                                <span class="indicator-value ${ind.vwap_signal === 'above' ? 'positive' : ind.vwap_signal === 'below' ? 'negative' : 'muted'}">
+                                    ${formatPrice(ind.vwap)}
+                                    ${ind.vwap_signal ? `<span class="signal-tag ${ind.vwap_signal === 'above' ? 'bullish' : 'bearish'}">${ind.vwap_signal}</span>` : ''}
+                                </span>
+                            </div>
+                            <div class="indicator-row">
+                                <span class="indicator-label">CVD 5m</span>
+                                <span class="indicator-value ${getValueClass(ind.cvd_5m)}">
+                                    ${formatPrice(ind.cvd_5m)}
+                                </span>
+                            </div>
+                            <div class="indicator-row">
+                                <span class="indicator-label">Walls</span>
+                                <span class="walls-info">
+                                    <span class="wall-count buy">${ind.buy_walls || 0} buy</span>
+                                    <span class="wall-count sell">${ind.sell_walls || 0} sell</span>
+                                </span>
+                            </div>
+                            ${ind.ha_last && ind.ha_last.length > 0 ? `
+                            <div class="indicator-row">
+                                <span class="indicator-label">Heikin Ashi</span>
+                                <div class="ha-candles">
+                                    ${ind.ha_last.map(green => `<div class="ha-candle ${green ? 'green' : 'red'}"></div>`).join('')}
+                                </div>
+                            </div>
+                            ` : ''}
+                        </div>
+                        <div class="score-bar">
+                            <div class="score-bar-label">
+                                <span>Trend Score</span>
+                                <span>${item.score >= 0 ? '+' : ''}${item.score || 0}</span>
+                            </div>
+                            <div class="score-bar-track">
+                                <div class="score-bar-fill ${scoreClass}" style="width: ${scorePercent}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('grid');
+            const coinData = data[currentCoin] || [];
+
+            if (coinData.length === 0) {
+                grid.innerHTML = TIMEFRAMES.map(tf => `
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">${tf}</div>
+                        </div>
+                        <div class="panel-body">
+                            <div class="loading">
+                                <div class="loading-spinner"></div>
+                                Loading data...
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                return;
+            }
+
+            grid.innerHTML = coinData.map(item => renderPanel(item)).join('');
+        }
+
+        function setStatus(status, text) {
+            const dot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            dot.className = 'status-dot ' + status;
+            statusText.textContent = text;
+        }
+
+        function connect() {
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
+
+            setStatus('connecting', 'Connecting...');
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                setStatus('', 'Connected');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    data = JSON.parse(event.data);
+                    renderGrid();
+                } catch (e) {
+                    console.error('Failed to parse message:', e);
+                }
+            };
+
+            ws.onclose = () => {
+                setStatus('disconnected', 'Disconnected');
+                reconnectTimeout = setTimeout(connect, 3000);
+            };
+
+            ws.onerror = () => {
+                ws.close();
+            };
+        }
+
+        document.getElementById('tabs').addEventListener('click', (e) => {
+            if (e.target.classList.contains('tab')) {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+                currentCoin = e.target.dataset.coin;
+                renderGrid();
+            }
+        });
+
+        connect();
+        renderGrid();
+    </script>
+</body>
+</html>
