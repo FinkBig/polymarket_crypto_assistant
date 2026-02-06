@@ -1,8 +1,14 @@
 import asyncio
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+
+# Add src directory to Python path for imports
+_src_dir = Path(__file__).parent.parent
+if str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
