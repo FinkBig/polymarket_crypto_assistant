@@ -17,6 +17,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import config
 
+# HTTP session with headers to avoid blocks
+http_session = requests.Session()
+http_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json",
+})
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 # Simple cache
@@ -45,23 +52,29 @@ def set_cached(key: str, data: Any):
 def fetch_binance_orderbook(symbol: str) -> dict:
     """Fetch orderbook from Binance."""
     try:
-        resp = requests.get(
+        resp = http_session.get(
             f"{config.BINANCE_REST}/depth",
             params={"symbol": symbol, "limit": 20},
-            timeout=5
-        ).json()
-        bids = [(float(p), float(q)) for p, q in resp["bids"]]
-        asks = [(float(p), float(q)) for p, q in resp["asks"]]
+            timeout=10
+        )
+        print(f"[Binance OB] {symbol}: status={resp.status_code}")
+        data = resp.json()
+        if "bids" not in data:
+            print(f"[Binance OB] Error response: {data}")
+            return {"bids": [], "asks": [], "mid": 0, "error": str(data)}
+        bids = [(float(p), float(q)) for p, q in data["bids"]]
+        asks = [(float(p), float(q)) for p, q in data["asks"]]
         mid = (bids[0][0] + asks[0][0]) / 2 if bids and asks else 0
         return {"bids": bids, "asks": asks, "mid": mid}
     except Exception as e:
+        print(f"[Binance OB] Exception: {e}")
         return {"bids": [], "asks": [], "mid": 0, "error": str(e)}
 
 
 def fetch_binance_klines(symbol: str, interval: str, limit: int = 100) -> list:
     """Fetch klines/candles from Binance."""
     try:
-        resp = requests.get(
+        resp = http_session.get(
             f"{config.BINANCE_REST}/klines",
             params={"symbol": symbol, "interval": interval, "limit": limit},
             timeout=5
@@ -92,7 +105,7 @@ def fetch_pm_market(coin: str, tf: str) -> dict:
         return {"pm_up": None, "pm_dn": None}
 
     try:
-        data = requests.get(
+        data = http_session.get(
             config.PM_GAMMA,
             params={"slug": slug, "limit": 1},
             timeout=5
