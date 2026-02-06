@@ -129,8 +129,15 @@ def fetch_pm_market(coin: str, tf: str) -> dict:
             return {"pm_up": None, "pm_dn": None}
 
         market = data[0]["markets"][0]
-        outcome_prices = market.get("outcomePrices", [])
-        print(f"[PM] {coin}/{tf}: outcomePrices={outcome_prices}")
+        outcome_prices_raw = market.get("outcomePrices", [])
+        print(f"[PM] {coin}/{tf}: outcomePrices={outcome_prices_raw}")
+
+        # Parse if it's a JSON string
+        if isinstance(outcome_prices_raw, str):
+            import json
+            outcome_prices = json.loads(outcome_prices_raw)
+        else:
+            outcome_prices = outcome_prices_raw
 
         if outcome_prices and len(outcome_prices) >= 2:
             return {"pm_up": float(outcome_prices[0]), "pm_dn": float(outcome_prices[1])}
