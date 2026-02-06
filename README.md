@@ -2,9 +2,9 @@
 
 Real-time dashboard that combines live Binance order flow with Polymarket prediction market prices to surface actionable crypto signals.
 
-**By [@SolSt1ne](https://x.com/SolSt1ne)**
+**[Live Demo](https://polymarket-crypto-assistant.onrender.com)** | **[Polymarket](https://polymarket.com/?via=Yxwa280)**
 
-**[Polymarket](https://polymarket.com/?via=Yxwa280)**
+**By [@SolSt1ne](https://x.com/SolSt1ne)**
 
 ---
 
@@ -138,6 +138,20 @@ polymarket-assistant/
 - **Backend**: FastAPI + uvicorn (async)
 - **Frontend**: Vanilla HTML/CSS/JS (no build step)
 - **Terminal**: Rich library
+- **Hosting**: Render.com
+
+---
+
+## Deploy to Render
+
+1. Fork this repo
+2. Go to [Render Dashboard](https://dashboard.render.com)
+3. Click **New** → **Web Service**
+4. Connect your GitHub repo
+5. Render will auto-detect `render.yaml` and configure everything
+6. Click **Create Web Service**
+
+The app will be live at `https://your-service-name.onrender.com`
 
 ---
 

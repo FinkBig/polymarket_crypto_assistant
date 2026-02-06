@@ -1,18 +1,16 @@
 import asyncio
-import json
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
 import config
 import indicators as ind
+import feeds
 from feeds import State
-
-app = FastAPI(title="Polymarket Crypto Assistant")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -20,7 +18,120 @@ states: dict[tuple[str, str], State] = {}
 
 connected_clients: list[WebSocket] = []
 
+background_tasks: list[asyncio.Task] = []
+
 TREND_THRESH = 3
+
+
+def get_market_expiry(tf: str) -> float:
+    now = time.time()
+    if tf == "15m":
+        period = 900
+        next_boundary = ((int(now) // period) + 1) * period
+        return max(next_boundary - now + 5, 10)
+    elif tf == "1h":
+        period = 3600
+        next_boundary = ((int(now) // period) + 1) * period
+        return max(next_boundary - now + 5, 10)
+    elif tf == "4h":
+        period = 14400
+        offset = 3600
+        adjusted = now - offset
+        next_boundary = ((int(adjusted) // period) + 1) * period + offset
+        return max(next_boundary - now + 5, 10)
+    elif tf == "daily":
+        return 3600
+    return 300
+
+
+async def start_coin_feeds(coin: str):
+    binance_sym = config.COIN_BINANCE[coin]
+    shared_ob_state = State()
+
+    for tf in config.TIMEFRAMES:
+        st = State()
+        states[(coin, tf)] = st
+        st.pm_up_id, st.pm_dn_id = feeds.fetch_pm_tokens(coin, tf)
+        if st.pm_up_id:
+            print(f"  [{coin}/{tf}] PM tokens loaded")
+        else:
+            print(f"  [{coin}/{tf}] No PM market available")
+        kline_iv = config.TF_KLINE[tf]
+        await feeds.bootstrap(binance_sym, kline_iv, st)
+
+    print(f"  [{coin}] Starting feeds...")
+
+    async def sync_ob():
+        while True:
+            for tf in config.TIMEFRAMES:
+                st = states[(coin, tf)]
+                st.bids = shared_ob_state.bids
+                st.asks = shared_ob_state.asks
+                st.mid = shared_ob_state.mid
+            await asyncio.sleep(0.5)
+
+    background_tasks.append(asyncio.create_task(feeds.ob_poller(binance_sym, shared_ob_state)))
+    background_tasks.append(asyncio.create_task(sync_ob()))
+
+    for tf in config.TIMEFRAMES:
+        st = states[(coin, tf)]
+        kline_iv = config.TF_KLINE[tf]
+
+        async def binance_wrapper(sym, kiv, state):
+            while True:
+                try:
+                    await feeds.binance_feed(sym, kiv, state)
+                except Exception as e:
+                    print(f"  [Binance] reconnecting ({sym} {kiv}): {e}")
+                    await asyncio.sleep(2)
+
+        async def pm_wrapper(state, coin_name, timeframe):
+            while True:
+                try:
+                    state.pm_up_id, state.pm_dn_id = feeds.fetch_pm_tokens(coin_name, timeframe)
+                    if state.pm_up_id:
+                        timeout = get_market_expiry(timeframe)
+                        print(f"  [PM] {coin_name}/{timeframe} market expires in {timeout:.0f}s")
+                        try:
+                            await asyncio.wait_for(feeds.pm_feed(state), timeout=timeout)
+                        except asyncio.TimeoutError:
+                            state.pm_up = None
+                            state.pm_dn = None
+                            print(f"  [PM] {coin_name}/{timeframe} market expired, refreshing...")
+                            continue
+                    else:
+                        await asyncio.sleep(30)
+                        continue
+                except Exception as e:
+                    print(f"  [PM] reconnecting ({coin_name}/{timeframe}): {e}")
+                await asyncio.sleep(5)
+
+        async def sync_trades(main_st, coin_key, tf_key):
+            primary = states[(coin_key, "15m")]
+            while True:
+                if tf_key != "15m":
+                    main_st.trades = primary.trades
+                await asyncio.sleep(1)
+
+        background_tasks.append(asyncio.create_task(binance_wrapper(binance_sym, kline_iv, st)))
+        background_tasks.append(asyncio.create_task(sync_trades(st, coin, tf)))
+        background_tasks.append(asyncio.create_task(pm_wrapper(st, coin, tf)))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("\n[Polymarket Crypto Assistant - Web UI]\n")
+    for coin in config.COINS:
+        print(f"[{coin}] Initializing...")
+        await start_coin_feeds(coin)
+    background_tasks.append(asyncio.create_task(broadcast_loop()))
+    print("\n[Server] Ready!\n")
+    yield
+    for task in background_tasks:
+        task.cancel()
+
+
+app = FastAPI(title="Polymarket Crypto Assistant", lifespan=lifespan)
 
 
 def calculate_trend_score(st: State) -> tuple[int, str]:
