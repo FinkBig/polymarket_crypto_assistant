@@ -349,6 +349,38 @@ async def health():
     return {"status": "ok", "timestamp": time.time()}
 
 
+@app.get("/debug")
+async def debug():
+    """Debug endpoint to test API connections."""
+    results = {}
+
+    # Test Binance
+    try:
+        resp = http_session.get(
+            f"{config.BINANCE_REST}/ticker/price",
+            params={"symbol": "BTCUSDT"},
+            timeout=10
+        )
+        results["binance_status"] = resp.status_code
+        results["binance_response"] = resp.text[:500]
+    except Exception as e:
+        results["binance_error"] = str(e)
+
+    # Test Polymarket
+    try:
+        resp = http_session.get(
+            config.PM_GAMMA,
+            params={"slug": "btc-updown-15m-0", "limit": 1},
+            timeout=10
+        )
+        results["pm_status"] = resp.status_code
+        results["pm_response"] = resp.text[:500]
+    except Exception as e:
+        results["pm_error"] = str(e)
+
+    return results
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
