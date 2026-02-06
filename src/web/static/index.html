@@ -162,6 +162,27 @@
             gap: 10px;
         }
 
+        .panel-title a {
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }
+
+        .panel-title a:hover {
+            color: var(--blue);
+        }
+
+        .panel-title a::after {
+            content: ' ↗';
+            font-size: 11px;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+
+        .panel-title a:hover::after {
+            opacity: 0.7;
+        }
+
         .badge {
             padding: 2px 8px;
             border-radius: 12px;
@@ -346,6 +367,139 @@
 
         .wall-count.buy { color: var(--green); }
         .wall-count.sell { color: var(--red); }
+
+        .recommendation {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .recommendation.buy-yes {
+            background: var(--green-bg);
+            border-color: var(--green);
+        }
+
+        .recommendation.buy-no {
+            background: var(--red-bg);
+            border-color: var(--red);
+        }
+
+        .recommendation.wait {
+            background: var(--bg-tertiary);
+        }
+
+        .recommendation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .recommendation-action {
+            font-size: 14px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .recommendation.buy-yes .recommendation-action { color: var(--green); }
+        .recommendation.buy-no .recommendation-action { color: var(--red); }
+        .recommendation.wait .recommendation-action { color: var(--text-muted); }
+
+        .recommendation-confidence {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .recommendation-confidence.high {
+            background: var(--green);
+            color: var(--bg-primary);
+        }
+
+        .recommendation-confidence.medium {
+            background: var(--yellow);
+            color: var(--bg-primary);
+        }
+
+        .recommendation-reason {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .recommendation.buy-yes .recommendation-reason,
+        .recommendation.buy-no .recommendation-reason {
+            color: var(--text-primary);
+        }
+
+        .market-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-size: 12px;
+        }
+
+        .strike-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .strike-label {
+            color: var(--text-muted);
+        }
+
+        .strike-price {
+            font-weight: 600;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .price-vs-strike {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 6px;
+        }
+
+        .price-vs-strike.above {
+            background: var(--green-bg);
+            color: var(--green);
+        }
+
+        .price-vs-strike.below {
+            background: var(--red-bg);
+            color: var(--red);
+        }
+
+        .time-remaining {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .time-remaining .label {
+            color: var(--text-muted);
+        }
+
+        .time-remaining .value {
+            font-weight: 600;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .time-remaining.urgent .value {
+            color: var(--red);
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .time-remaining.warning .value {
+            color: var(--yellow);
+        }
     </style>
 </head>
 <body>
@@ -404,6 +558,71 @@
             return 'neutral';
         }
 
+        function formatTimeRemaining(seconds) {
+            if (seconds == null) return '—';
+            if (seconds < 0) return 'Expired';
+            if (seconds < 60) return `${Math.floor(seconds)}s`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`;
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${mins}m`;
+        }
+
+        function getTimeClass(seconds) {
+            if (seconds == null) return '';
+            if (seconds < 120) return 'urgent';
+            if (seconds < 300) return 'warning';
+            return '';
+        }
+
+        function renderMarketInfo(item) {
+            const strike = item.strike;
+            const timeRemaining = item.time_remaining;
+            const price = item.price;
+
+            if (strike == null && timeRemaining == null) return '';
+
+            let priceVsStrike = '';
+            if (strike != null && price != null) {
+                const diff = ((price - strike) / strike * 100).toFixed(2);
+                const isAbove = price >= strike;
+                priceVsStrike = `<span class="price-vs-strike ${isAbove ? 'above' : 'below'}">${isAbove ? '+' : ''}${diff}%</span>`;
+            }
+
+            const timeClass = getTimeClass(timeRemaining);
+
+            return `
+                <div class="market-info">
+                    <div class="strike-info">
+                        <span class="strike-label">Strike:</span>
+                        <span class="strike-price">${strike != null ? formatPrice(strike) : '—'}</span>
+                        ${priceVsStrike}
+                    </div>
+                    <div class="time-remaining ${timeClass}">
+                        <span class="label">Expires:</span>
+                        <span class="value">${formatTimeRemaining(timeRemaining)}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderRecommendation(rec) {
+            if (!rec) return '';
+
+            const actionClass = rec.action === 'BUY_YES' ? 'buy-yes' : rec.action === 'BUY_NO' ? 'buy-no' : 'wait';
+            const actionText = rec.action === 'BUY_YES' ? 'Buy Yes' : rec.action === 'BUY_NO' ? 'Buy No' : 'Wait';
+
+            return `
+                <div class="recommendation ${actionClass}">
+                    <div class="recommendation-header">
+                        <span class="recommendation-action">${actionText}</span>
+                        ${rec.confidence ? `<span class="recommendation-confidence ${rec.confidence.toLowerCase()}">${rec.confidence}</span>` : ''}
+                    </div>
+                    <div class="recommendation-reason">${rec.reason || ''}</div>
+                </div>
+            `;
+        }
+
         function renderPanel(item) {
             if (item.loading) {
                 return `
@@ -430,7 +649,7 @@
                 <div class="panel">
                     <div class="panel-header">
                         <div class="panel-title">
-                            ${item.timeframe}
+                            ${item.market_url ? `<a href="${item.market_url}" target="_blank" rel="noopener">${item.timeframe}</a>` : item.timeframe}
                             <span class="badge ${trendClass}">${item.trend || 'NEUTRAL'}</span>
                         </div>
                         <span class="score">${item.score >= 0 ? '+' : ''}${item.score || 0}</span>
@@ -444,6 +663,7 @@
                                 <span class="pm-dn">${item.pm_dn != null ? item.pm_dn.toFixed(3) : '—'}</span>
                             </div>
                         </div>
+                        ${renderMarketInfo(item)}
                         <div class="indicators">
                             <div class="indicator-row">
                                 <span class="indicator-label">OBI</span>
@@ -509,6 +729,7 @@
                                 <div class="score-bar-fill ${scoreClass}" style="width: ${scorePercent}%"></div>
                             </div>
                         </div>
+                        ${renderRecommendation(item.recommendation)}
                     </div>
                 </div>
             `;
