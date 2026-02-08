@@ -38,6 +38,20 @@ connected_clients: list[WebSocket] = []
 last_broadcast = 0
 BROADCAST_INTERVAL = 1  # Push updates every 1 second
 
+# ── Trend & recommendation stability ─────────────────────────────
+# Hysteresis: enter at TREND_ENTER, exit only when abs(score) drops below TREND_EXIT
+TREND_ENTER = 3   # score must reach ±3 to trigger BULLISH/BEARISH
+TREND_EXIT  = 1   # score must drop to ±1 to revert to NEUTRAL
+
+# Minimum hold: once a recommendation fires, keep it for at least this many seconds
+REC_HOLD_SECONDS = 45
+
+# Persistent state for hysteresis and hold timers
+# {(coin, tf): "BULLISH" | "BEARISH" | "NEUTRAL"}
+_prev_trend: dict[tuple[str, str], str] = {}
+# {(coin, tf): {"rec": {...}, "expires": float}}
+_held_recs: dict[tuple[str, str], dict] = {}
+
 
 def calculate_indicators(state: State) -> dict:
     """Calculate all indicators from state."""
@@ -76,8 +90,8 @@ def calculate_indicators(state: State) -> dict:
     }
 
 
-def calculate_trend_score(indicators: dict, mid: float) -> tuple[int, str]:
-    """Calculate trend score from indicators."""
+def _raw_score(indicators: dict, mid: float) -> int:
+    """Calculate raw trend score from indicators (no hysteresis)."""
     score = 0
 
     obi_v = indicators.get("obi", 0)
@@ -118,11 +132,41 @@ def calculate_trend_score(indicators: dict, mid: float) -> tuple[int, str]:
         elif not any(ha[-3:]):
             score -= 1
 
-    if score >= 3:
-        return score, "BULLISH"
-    elif score <= -3:
-        return score, "BEARISH"
-    return score, "NEUTRAL"
+    return score
+
+
+def calculate_trend_score(indicators: dict, mid: float, coin: str = "", tf: str = "") -> tuple[int, str]:
+    """Calculate trend score with hysteresis to prevent flickering."""
+    score = _raw_score(indicators, mid)
+    key = (coin, tf)
+    prev = _prev_trend.get(key, "NEUTRAL")
+
+    # Hysteresis: require TREND_ENTER to switch into a trend,
+    # but only revert to NEUTRAL when score drops to TREND_EXIT
+    if prev == "NEUTRAL":
+        if score >= TREND_ENTER:
+            trend = "BULLISH"
+        elif score <= -TREND_ENTER:
+            trend = "BEARISH"
+        else:
+            trend = "NEUTRAL"
+    elif prev == "BULLISH":
+        if score <= -TREND_ENTER:
+            trend = "BEARISH"
+        elif score >= TREND_EXIT:
+            trend = "BULLISH"  # hold bullish until score drops below exit
+        else:
+            trend = "NEUTRAL"
+    else:  # prev == "BEARISH"
+        if score >= TREND_ENTER:
+            trend = "BULLISH"
+        elif score <= -TREND_EXIT:
+            trend = "BEARISH"  # hold bearish until score rises above exit
+        else:
+            trend = "NEUTRAL"
+
+    _prev_trend[key] = trend
+    return score, trend
 
 
 def calculate_recommendation(
@@ -278,12 +322,32 @@ def serialize_all_data() -> dict:
             market_url = meta.get("url")
 
             indicators = calculate_indicators(state)
-            score, trend = calculate_trend_score(indicators, state.mid)
-            recommendation = calculate_recommendation(
+            score, trend = calculate_trend_score(indicators, state.mid, coin, tf)
+            new_rec = calculate_recommendation(
                 score, trend, indicators,
                 state.pm_up, state.pm_dn,
                 state.mid, strike, time_remaining
             )
+
+            # Minimum hold: keep an active recommendation for REC_HOLD_SECONDS
+            key = (coin, tf)
+            held = _held_recs.get(key)
+            if new_rec["action"] != "WAIT":
+                # New actionable recommendation — (re)start the hold timer
+                if not held or held["rec"]["action"] != new_rec["action"] or now >= held["expires"]:
+                    _held_recs[key] = {"rec": new_rec, "expires": now + REC_HOLD_SECONDS}
+                else:
+                    # Same action still active — extend the expiry
+                    _held_recs[key]["expires"] = now + REC_HOLD_SECONDS
+                    _held_recs[key]["rec"] = new_rec
+                recommendation = new_rec
+            elif held and now < held["expires"]:
+                # Current calc says WAIT but we're still in the hold window
+                recommendation = held["rec"]
+            else:
+                # No hold active, use WAIT
+                _held_recs.pop(key, None)
+                recommendation = new_rec
 
             result[coin].append({
                 "coin": coin,
