@@ -14,11 +14,12 @@ _src_dir = Path(__file__).parent.parent
 if str(_src_dir) not in sys.path:
     sys.path.insert(0, str(_src_dir))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 import config
+import database as db
 import indicators as ind
 from feeds import State, ob_poller, binance_feed, bootstrap, fetch_pm_tokens, pm_feed, _build_slug
 import requests
@@ -51,6 +52,15 @@ REC_HOLD_SECONDS = 45
 _prev_trend: dict[tuple[str, str], str] = {}
 # {(coin, tf): {"rec": {...}, "expires": float}}
 _held_recs: dict[tuple[str, str], dict] = {}
+
+# Track which signals have been logged: {(coin, tf): set of (market_id, action)}
+_logged_signals: dict[tuple[str, str], set] = {}
+
+
+def _market_id(coin: str, tf: str, meta: dict) -> str:
+    """Build a unique market_id like BTC-15m-1770570000."""
+    start = int(meta.get("start", 0))
+    return f"{coin}-{tf}-{start}"
 
 
 def calculate_indicators(state: State) -> dict:
@@ -348,6 +358,30 @@ def serialize_all_data() -> dict:
                 # No hold active, use WAIT
                 _held_recs.pop(key, None)
                 recommendation = new_rec
+
+            # ── Signal logging ──────────────────────────────────
+            meta = market_meta.get((coin, tf), {})
+            if recommendation["action"] in ("BUY_YES", "BUY_NO") and meta.get("start"):
+                mid = _market_id(coin, tf, meta)
+                log_key = (mid, recommendation["action"])
+                seen = _logged_signals.setdefault(key, set())
+                if log_key not in seen:
+                    seen.add(log_key)
+                    asyncio.get_event_loop().call_soon_threadsafe(
+                        lambda: asyncio.ensure_future(db.async_log_signal(
+                            market_id=mid, coin=coin, timeframe=tf,
+                            action=recommendation["action"],
+                            confidence=recommendation.get("confidence"),
+                            reason=recommendation.get("reason"),
+                            price=state.pm_up if recommendation["action"] == "BUY_YES" else state.pm_dn,
+                            strike_price=strike, score=score, trend=trend,
+                            pm_up=state.pm_up, pm_dn=state.pm_dn,
+                            time_remaining=time_remaining,
+                            rsi=indicators.get("rsi"),
+                            macd_hist=indicators.get("macd_hist"),
+                            obi=indicators.get("obi"),
+                        ))
+                    )
 
             result[coin].append({
                 "coin": coin,
@@ -702,6 +736,16 @@ async def pm_feed_wrapper(state: State, coin: str, tf: str):
                     # Check if market has expired
                     if time.time() >= expiry:
                         print(f"[{coin}/{tf}] PM market expired, refreshing...")
+                        # Log outcome
+                        if meta and state.mid and meta.get("start"):
+                            mid = _market_id(coin, tf, meta)
+                            asyncio.create_task(db.async_log_outcome(
+                                market_id=mid, coin=coin, timeframe=tf,
+                                strike_price=meta.get("strike"),
+                                final_price=state.mid,
+                            ))
+                            # Clear logged signals for this market
+                            _logged_signals.pop((coin, tf), None)
                         break  # Exit inner loop to refresh tokens
 
                     # Use wait_for with timeout to periodically check expiry
@@ -746,7 +790,9 @@ _feed_tasks = []
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _feed_tasks
-    print("\n[Server] Starting live WebSocket feeds...\n")
+    print("\n[Server] Initializing database...")
+    db.init_db()
+    print("[Server] Starting live WebSocket feeds...\n")
     _feed_tasks = await start_feeds()
     yield
     print("\n[Server] Shutting down...")
@@ -778,6 +824,26 @@ async def get_all_data():
 @app.get("/health")
 async def health():
     return {"status": "ok", "mode": "live", "timestamp": time.time()}
+
+
+@app.get("/api/stats")
+async def api_stats(
+    coin: str | None = Query(None),
+    timeframe: str | None = Query(None),
+    confidence: str | None = Query(None),
+):
+    """Aggregated signal performance stats."""
+    return await db.async_get_stats(coin=coin, timeframe=timeframe, confidence=confidence)
+
+
+@app.get("/api/signals")
+async def api_signals(
+    coin: str | None = Query(None),
+    timeframe: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Recent signals with outcomes."""
+    return await db.async_get_signals(coin=coin, timeframe=timeframe, limit=limit)
 
 
 @app.websocket("/ws")

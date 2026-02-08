@@ -500,6 +500,105 @@
         .time-remaining.warning .value {
             color: var(--yellow);
         }
+
+        /* ── Stats tab ──────────────────────────────────── */
+        .stats-view { display: none; }
+        .stats-view.active { display: block; }
+        .grid-view { display: block; }
+        .grid-view.hidden { display: none; }
+
+        .stats-header {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .stats-header { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .stat-card .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .stat-card .stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .stat-card .stat-value.positive { color: var(--green); }
+        .stat-card .stat-value.negative { color: var(--red); }
+
+        .stats-section {
+            margin-bottom: 24px;
+        }
+
+        .stats-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        .stats-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .stats-table th,
+        .stats-table td {
+            padding: 10px 14px;
+            text-align: left;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .stats-table th {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stats-table tr:last-child td { border-bottom: none; }
+
+        .stats-table .win { color: var(--green); }
+        .stats-table .loss { color: var(--red); }
+        .stats-table .pending { color: var(--text-muted); }
+
+        .stats-filters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .stats-filters select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            padding: 6px 12px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -519,10 +618,14 @@
         <button class="tab" data-coin="ETH">ETH</button>
         <button class="tab" data-coin="SOL">SOL</button>
         <button class="tab" data-coin="XRP">XRP</button>
+        <button class="tab" data-view="stats" style="margin-left:auto">Stats</button>
     </nav>
 
     <main class="main">
-        <div class="grid" id="grid"></div>
+        <div class="grid-view" id="gridView">
+            <div class="grid" id="grid"></div>
+        </div>
+        <div class="stats-view" id="statsView"></div>
     </main>
 
     <script>
@@ -800,12 +903,170 @@
             };
         }
 
+        // ── Stats tab ────────────────────────────────────────
+        let statsView = 'grid'; // 'grid' or 'stats'
+        let statsFilterCoin = '';
+        let statsFilterTf = '';
+        let statsFilterConf = '';
+
+        function formatPct(val) {
+            if (val == null) return '—';
+            return (val * 100).toFixed(1) + '%';
+        }
+
+        function formatRoi(val) {
+            if (val == null) return '—';
+            const pct = (val * 100).toFixed(1) + '%';
+            return val >= 0 ? '+' + pct : pct;
+        }
+
+        function roiClass(val) {
+            if (val == null) return '';
+            return val >= 0 ? 'positive' : 'negative';
+        }
+
+        function renderBreakdownTable(rows, labelKey) {
+            if (!rows || rows.length === 0) return '<p style="color:var(--text-muted);font-size:13px">No data</p>';
+            return `<table class="stats-table">
+                <thead><tr>
+                    <th>${labelKey}</th><th>Total</th><th>Wins</th><th>Win Rate</th><th>Avg ROI</th>
+                </tr></thead>
+                <tbody>${rows.map(r => {
+                    const wr = r.total ? (r.wins / r.total * 100).toFixed(1) + '%' : '—';
+                    return `<tr>
+                        <td>${r[labelKey] || '—'}</td>
+                        <td>${r.total}</td>
+                        <td>${r.wins}</td>
+                        <td>${wr}</td>
+                        <td class="${roiClass(r.avg_roi)}">${formatRoi(r.avg_roi)}</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>`;
+        }
+
+        function renderSignalsTable(signals) {
+            if (!signals || signals.length === 0) return '<p style="color:var(--text-muted);font-size:13px">No signals recorded yet</p>';
+            return `<table class="stats-table">
+                <thead><tr>
+                    <th>Time</th><th>Coin</th><th>TF</th><th>Action</th><th>Conf</th><th>Price</th><th>Result</th><th>ROI</th>
+                </tr></thead>
+                <tbody>${signals.map(s => {
+                    const dt = new Date(s.signal_time * 1000);
+                    const time = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+                    const resultClass = s.result === 'WIN' ? 'win' : s.result === 'LOSS' ? 'loss' : 'pending';
+                    return `<tr>
+                        <td>${time}</td>
+                        <td>${s.coin}</td>
+                        <td>${s.timeframe}</td>
+                        <td><span class="badge ${s.action === 'BUY_YES' ? 'bullish' : 'bearish'}">${s.action}</span></td>
+                        <td>${s.confidence || '—'}</td>
+                        <td>${s.entry_pm_price != null ? s.entry_pm_price.toFixed(3) : '—'}</td>
+                        <td class="${resultClass}">${s.result || 'PENDING'}</td>
+                        <td class="${roiClass(s.roi)}">${formatRoi(s.roi)}</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>`;
+        }
+
+        async function loadStats() {
+            const params = new URLSearchParams();
+            if (statsFilterCoin) params.set('coin', statsFilterCoin);
+            if (statsFilterTf) params.set('timeframe', statsFilterTf);
+            if (statsFilterConf) params.set('confidence', statsFilterConf);
+
+            try {
+                const [statsRes, signalsRes] = await Promise.all([
+                    fetch('/api/stats?' + params),
+                    fetch('/api/signals?' + params + '&limit=50'),
+                ]);
+                const stats = await statsRes.json();
+                const signals = await signalsRes.json();
+                renderStatsView(stats, signals);
+            } catch (e) {
+                document.getElementById('statsView').innerHTML =
+                    '<p style="color:var(--red);padding:24px">Failed to load stats</p>';
+            }
+        }
+
+        function renderStatsView(stats, signals) {
+            const el = document.getElementById('statsView');
+            const wrClass = stats.win_rate != null ? (stats.win_rate >= 0.5 ? 'positive' : 'negative') : '';
+            const roiC = stats.avg_roi != null ? (stats.avg_roi >= 0 ? 'positive' : 'negative') : '';
+
+            el.innerHTML = `
+                <div class="stats-filters">
+                    <select id="statsCoin" onchange="statsFilterCoin=this.value;loadStats()">
+                        <option value="">All Coins</option>
+                        ${['BTC','ETH','SOL','XRP'].map(c => `<option value="${c}" ${statsFilterCoin===c?'selected':''}>${c}</option>`).join('')}
+                    </select>
+                    <select id="statsTf" onchange="statsFilterTf=this.value;loadStats()">
+                        <option value="">All Timeframes</option>
+                        ${['15m','1h','4h','daily'].map(t => `<option value="${t}" ${statsFilterTf===t?'selected':''}>${t}</option>`).join('')}
+                    </select>
+                    <select id="statsConf" onchange="statsFilterConf=this.value;loadStats()">
+                        <option value="">All Confidence</option>
+                        ${['HIGH','MEDIUM'].map(c => `<option value="${c}" ${statsFilterConf===c?'selected':''}>${c}</option>`).join('')}
+                    </select>
+                </div>
+
+                <div class="stats-header">
+                    <div class="stat-card">
+                        <div class="stat-value ${wrClass}">${stats.win_rate != null ? formatPct(stats.win_rate) : '—'}</div>
+                        <div class="stat-label">Win Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.total}</div>
+                        <div class="stat-label">Resolved Signals</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value ${roiC}">${stats.avg_roi != null ? formatRoi(stats.avg_roi) : '—'}</div>
+                        <div class="stat-label">Avg ROI</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" style="color:var(--yellow)">${stats.pending}</div>
+                        <div class="stat-label">Pending</div>
+                    </div>
+                </div>
+
+                <div class="stats-section">
+                    <h3>By Coin</h3>
+                    ${renderBreakdownTable(stats.by_coin, 'coin')}
+                </div>
+                <div class="stats-section">
+                    <h3>By Timeframe</h3>
+                    ${renderBreakdownTable(stats.by_timeframe, 'timeframe')}
+                </div>
+                <div class="stats-section">
+                    <h3>By Confidence</h3>
+                    ${renderBreakdownTable(stats.by_confidence, 'confidence')}
+                </div>
+
+                <div class="stats-section">
+                    <h3>Recent Signals</h3>
+                    ${renderSignalsTable(signals)}
+                </div>
+            `;
+        }
+
+        function switchView(view) {
+            statsView = view;
+            document.getElementById('gridView').classList.toggle('hidden', view === 'stats');
+            document.getElementById('statsView').classList.toggle('active', view === 'stats');
+            if (view === 'stats') loadStats();
+        }
+
         document.getElementById('tabs').addEventListener('click', (e) => {
             if (e.target.classList.contains('tab')) {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 e.target.classList.add('active');
-                currentCoin = e.target.dataset.coin;
-                renderGrid();
+
+                if (e.target.dataset.view === 'stats') {
+                    switchView('stats');
+                } else if (e.target.dataset.coin) {
+                    currentCoin = e.target.dataset.coin;
+                    switchView('grid');
+                    renderGrid();
+                }
             }
         });
 
