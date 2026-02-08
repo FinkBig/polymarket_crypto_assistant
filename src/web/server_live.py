@@ -341,14 +341,11 @@ async def start_feeds():
 
             # Bootstrap historical klines
             kline_interval = config.TF_KLINE[tf]
-            print(f"[{coin}/{tf}] Bootstrapping...")
+            print(f"[{coin}/{tf}] Bootstrapping...", flush=True)
             try:
-                await asyncio.get_running_loop().run_in_executor(
-                    None,
-                    lambda s=symbol, i=kline_interval, st=state: bootstrap_sync(s, i, st)
-                )
+                bootstrap_sync(symbol, kline_interval, state)
             except Exception as e:
-                print(f"[{coin}/{tf}] Bootstrap error: {e}")
+                print(f"[{coin}/{tf}] Bootstrap error: {e}", flush=True)
 
             # Start Polymarket WebSocket feed (handles token refresh on expiry)
             tasks.append(asyncio.create_task(pm_feed_wrapper(state, coin, tf)))
@@ -391,17 +388,26 @@ def bootstrap_sync(symbol: str, interval: str, state: State):
         print(f"  [Binance] loaded {len(state.klines)} candles")
 
 
+def _fetch_ob(symbol: str):
+    """Fetch orderbook synchronously (runs in executor)."""
+    resp = requests.get(
+        f"{config.BINANCE_REST}/depth",
+        params={"symbol": symbol, "limit": 20},
+        timeout=3
+    ).json()
+    bids = [(float(p), float(q)) for p, q in resp.get("bids", [])]
+    asks = [(float(p), float(q)) for p, q in resp.get("asks", [])]
+    mid = (bids[0][0] + asks[0][0]) / 2 if bids and asks else 0
+    return bids, asks, mid
+
+
 async def ob_poller_wrapper(symbol: str, coin: str):
     """Wrapper for orderbook poller that updates all timeframe states."""
-    import requests
-    url = f"{config.BINANCE_REST}/depth"
+    loop = asyncio.get_running_loop()
     print(f"[{coin}] Starting orderbook poller")
     while True:
         try:
-            resp = requests.get(url, params={"symbol": symbol, "limit": 20}, timeout=3).json()
-            bids = [(float(p), float(q)) for p, q in resp.get("bids", [])]
-            asks = [(float(p), float(q)) for p, q in resp.get("asks", [])]
-            mid = (bids[0][0] + asks[0][0]) / 2 if bids and asks else 0
+            bids, asks, mid = await loop.run_in_executor(None, _fetch_ob, symbol)
 
             # Update all timeframe states for this coin
             for tf in config.TIMEFRAMES:
@@ -599,10 +605,11 @@ async def pm_feed_wrapper(state: State, coin: str, tf: str):
     """Wrapper for Polymarket WebSocket feed with reconnection and market refresh."""
     import websockets
 
+    loop = asyncio.get_running_loop()
     while True:
         try:
-            # Fetch fresh token IDs for current market
-            up_id, dn_id = fetch_pm_tokens(coin, tf)
+            # Fetch fresh token IDs for current market (sync → executor)
+            up_id, dn_id = await loop.run_in_executor(None, fetch_pm_tokens, coin, tf)
             if not up_id:
                 print(f"[{coin}/{tf}] No PM market available, retrying in 60s...")
                 await asyncio.sleep(60)
@@ -611,8 +618,8 @@ async def pm_feed_wrapper(state: State, coin: str, tf: str):
             state.pm_up_id = up_id
             state.pm_dn_id = dn_id
 
-            # Fetch market metadata (strike price, expiry)
-            meta = fetch_market_metadata(coin, tf)
+            # Fetch market metadata (strike price, expiry) (sync → executor)
+            meta = await loop.run_in_executor(None, fetch_market_metadata, coin, tf)
             if meta:
                 market_meta[(coin, tf)] = meta
                 print(f"[{coin}/{tf}] Strike: ${meta['strike']:.2f}" if meta['strike'] else f"[{coin}/{tf}] No strike price")
