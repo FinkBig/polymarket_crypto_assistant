@@ -265,6 +265,105 @@ def get_stats(coin: str | None = None, timeframe: str | None = None,
         conn.close()
 
 
+def get_backtest(coin: str | None = None, timeframe: str | None = None,
+                 confidence: str | None = None) -> dict:
+    """Return chronological trades and computed backtest stats."""
+    conn = _connect()
+    try:
+        where_parts = ["result IS NOT NULL"]
+        params: list = []
+
+        if coin:
+            where_parts.append("coin = ?")
+            params.append(coin)
+        if timeframe:
+            where_parts.append("timeframe = ?")
+            params.append(timeframe)
+        if confidence:
+            where_parts.append("confidence = ?")
+            params.append(confidence)
+
+        where = " AND ".join(where_parts)
+
+        rows = conn.execute(f"""
+            SELECT signal_time, coin, timeframe, action, confidence,
+                   entry_pm_price, result, roi, outcome
+            FROM signal_performance
+            WHERE {where}
+            ORDER BY signal_time ASC
+        """, params).fetchall()
+
+        trades = [dict(r) for r in rows]
+
+        # Compute aggregate stats
+        total = len(trades)
+        wins = sum(1 for t in trades if t["result"] == "WIN")
+        losses = total - wins
+        win_rate = round(wins / total, 4) if total else None
+
+        rois = [t["roi"] for t in trades if t["roi"] is not None]
+        total_pnl = round(sum(rois), 4) if rois else 0
+        best_trade = round(max(rois), 4) if rois else None
+        worst_trade = round(min(rois), 4) if rois else None
+
+        gross_wins = sum(r for r in rois if r > 0)
+        gross_losses = abs(sum(r for r in rois if r < 0))
+        profit_factor = round(gross_wins / gross_losses, 4) if gross_losses else None
+
+        win_rois = [r for r in rois if r > 0]
+        loss_rois = [r for r in rois if r < 0]
+        avg_win = round(sum(win_rois) / len(win_rois), 4) if win_rois else None
+        avg_loss = round(sum(loss_rois) / len(loss_rois), 4) if loss_rois else None
+
+        # Max drawdown (peak-to-trough on cumulative PnL)
+        max_drawdown = 0.0
+        peak = 0.0
+        cum = 0.0
+        for r in rois:
+            cum += r
+            if cum > peak:
+                peak = cum
+            dd = peak - cum
+            if dd > max_drawdown:
+                max_drawdown = dd
+        max_drawdown = round(max_drawdown, 4)
+
+        # Streaks
+        longest_win = longest_loss = cur_win = cur_loss = 0
+        for t in trades:
+            if t["result"] == "WIN":
+                cur_win += 1
+                cur_loss = 0
+                if cur_win > longest_win:
+                    longest_win = cur_win
+            else:
+                cur_loss += 1
+                cur_win = 0
+                if cur_loss > longest_loss:
+                    longest_loss = cur_loss
+
+        return {
+            "stats": {
+                "total": total,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": win_rate,
+                "total_pnl": total_pnl,
+                "best_trade": best_trade,
+                "worst_trade": worst_trade,
+                "max_drawdown": max_drawdown,
+                "profit_factor": profit_factor,
+                "avg_win": avg_win,
+                "avg_loss": avg_loss,
+                "longest_win_streak": longest_win,
+                "longest_loss_streak": longest_loss,
+            },
+            "trades": trades,
+        }
+    finally:
+        conn.close()
+
+
 def get_signals(coin: str | None = None, timeframe: str | None = None,
                 limit: int = 50) -> list[dict]:
     """Fetch recent signals with their outcomes."""
@@ -320,3 +419,8 @@ async def async_get_stats(*args, **kwargs) -> dict:
 async def async_get_signals(*args, **kwargs) -> list[dict]:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: get_signals(*args, **kwargs))
+
+
+async def async_get_backtest(*args, **kwargs) -> dict:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: get_backtest(*args, **kwargs))

@@ -501,11 +501,63 @@
             color: var(--yellow);
         }
 
-        /* ── Stats tab ──────────────────────────────────── */
+        /* ── Stats / Backtest tabs ─────────────────────── */
         .stats-view { display: none; }
         .stats-view.active { display: block; }
+        .backtest-view { display: none; }
+        .backtest-view.active { display: block; }
         .grid-view { display: block; }
         .grid-view.hidden { display: none; }
+
+        /* ── Backtest-specific styles ─────────────────── */
+        .equity-chart-wrap {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .equity-chart-wrap h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .equity-chart-wrap canvas {
+            width: 100%;
+            height: 250px;
+            display: block;
+        }
+
+        .bt-detail-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .bt-detail-table td {
+            padding: 8px 14px;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .bt-detail-table td:first-child {
+            color: var(--text-secondary);
+            width: 50%;
+        }
+
+        .bt-detail-table td:last-child {
+            font-weight: 600;
+            font-family: 'SF Mono', Monaco, monospace;
+            text-align: right;
+        }
+
+        .bt-detail-table tr:last-child td { border-bottom: none; }
 
         .stats-header {
             display: grid;
@@ -619,6 +671,7 @@
         <button class="tab" data-coin="SOL">SOL</button>
         <button class="tab" data-coin="XRP">XRP</button>
         <button class="tab" data-view="stats" style="margin-left:auto">Stats</button>
+        <button class="tab" data-view="backtest">Backtest</button>
     </nav>
 
     <main class="main">
@@ -626,6 +679,7 @@
             <div class="grid" id="grid"></div>
         </div>
         <div class="stats-view" id="statsView"></div>
+        <div class="backtest-view" id="backtestView"></div>
     </main>
 
     <script>
@@ -1050,9 +1104,11 @@
 
         function switchView(view) {
             statsView = view;
-            document.getElementById('gridView').classList.toggle('hidden', view === 'stats');
+            document.getElementById('gridView').classList.toggle('hidden', view !== 'grid');
             document.getElementById('statsView').classList.toggle('active', view === 'stats');
+            document.getElementById('backtestView').classList.toggle('active', view === 'backtest');
             if (view === 'stats') loadStats();
+            if (view === 'backtest') loadBacktest();
         }
 
         document.getElementById('tabs').addEventListener('click', (e) => {
@@ -1062,6 +1118,8 @@
 
                 if (e.target.dataset.view === 'stats') {
                     switchView('stats');
+                } else if (e.target.dataset.view === 'backtest') {
+                    switchView('backtest');
                 } else if (e.target.dataset.coin) {
                     currentCoin = e.target.dataset.coin;
                     switchView('grid');
@@ -1069,6 +1127,231 @@
                 }
             }
         });
+
+        // ── Backtest tab ─────────────────────────────────────
+        let btFilterCoin = '';
+        let btFilterTf = '';
+        let btFilterConf = '';
+
+        async function loadBacktest() {
+            const params = new URLSearchParams();
+            if (btFilterCoin) params.set('coin', btFilterCoin);
+            if (btFilterTf) params.set('timeframe', btFilterTf);
+            if (btFilterConf) params.set('confidence', btFilterConf);
+
+            try {
+                const res = await fetch('/api/backtest?' + params);
+                const json = await res.json();
+                renderBacktestView(json.stats, json.trades);
+            } catch (e) {
+                document.getElementById('backtestView').innerHTML =
+                    '<p style="color:var(--red);padding:24px">Failed to load backtest data</p>';
+            }
+        }
+
+        function renderBacktestView(stats, trades) {
+            const el = document.getElementById('backtestView');
+            const pnlClass = stats.total_pnl >= 0 ? 'positive' : 'negative';
+            const wrClass = stats.win_rate != null ? (stats.win_rate >= 0.5 ? 'positive' : 'negative') : '';
+
+            // Build cumulative PnL for trade log
+            let cum = 0;
+            const tradesWithCum = trades.map(t => {
+                cum += (t.roi || 0);
+                return { ...t, cum_pnl: cum };
+            });
+
+            el.innerHTML = `
+                <div class="stats-filters">
+                    <select onchange="btFilterCoin=this.value;loadBacktest()">
+                        <option value="">All Coins</option>
+                        ${['BTC','ETH','SOL','XRP'].map(c => `<option value="${c}" ${btFilterCoin===c?'selected':''}>${c}</option>`).join('')}
+                    </select>
+                    <select onchange="btFilterTf=this.value;loadBacktest()">
+                        <option value="">All Timeframes</option>
+                        ${['15m','1h','4h','daily'].map(t => `<option value="${t}" ${btFilterTf===t?'selected':''}>${t}</option>`).join('')}
+                    </select>
+                    <select onchange="btFilterConf=this.value;loadBacktest()">
+                        <option value="">All Confidence</option>
+                        ${['HIGH','MEDIUM'].map(c => `<option value="${c}" ${btFilterConf===c?'selected':''}>${c}</option>`).join('')}
+                    </select>
+                </div>
+
+                <div class="equity-chart-wrap">
+                    <h3>Equity Curve ($1 per trade)</h3>
+                    <canvas id="equityCanvas" height="250"></canvas>
+                </div>
+
+                <div class="stats-header">
+                    <div class="stat-card">
+                        <div class="stat-value ${pnlClass}">${stats.total_pnl != null ? (stats.total_pnl >= 0 ? '+' : '') + '$' + Math.abs(stats.total_pnl).toFixed(2) : '—'}</div>
+                        <div class="stat-label">Total PnL</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value ${wrClass}">${stats.win_rate != null ? formatPct(stats.win_rate) : '—'}</div>
+                        <div class="stat-label">Win Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${stats.profit_factor != null ? stats.profit_factor.toFixed(2) : '—'}</div>
+                        <div class="stat-label">Profit Factor</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value negative">${stats.max_drawdown != null ? '-$' + stats.max_drawdown.toFixed(2) : '—'}</div>
+                        <div class="stat-label">Max Drawdown</div>
+                    </div>
+                </div>
+
+                <div class="stats-section">
+                    <h3>Detailed Stats</h3>
+                    <table class="bt-detail-table">
+                        <tr><td>Total Trades</td><td>${stats.total}</td></tr>
+                        <tr><td>Wins / Losses</td><td><span style="color:var(--green)">${stats.wins}</span> / <span style="color:var(--red)">${stats.losses}</span></td></tr>
+                        <tr><td>Avg Win</td><td class="${stats.avg_win != null && stats.avg_win >= 0 ? 'positive' : ''}" style="color:var(--green)">${stats.avg_win != null ? formatRoi(stats.avg_win) : '—'}</td></tr>
+                        <tr><td>Avg Loss</td><td style="color:var(--red)">${stats.avg_loss != null ? formatRoi(stats.avg_loss) : '—'}</td></tr>
+                        <tr><td>Best Trade</td><td style="color:var(--green)">${stats.best_trade != null ? formatRoi(stats.best_trade) : '—'}</td></tr>
+                        <tr><td>Worst Trade</td><td style="color:var(--red)">${stats.worst_trade != null ? formatRoi(stats.worst_trade) : '—'}</td></tr>
+                        <tr><td>Longest Win Streak</td><td>${stats.longest_win_streak}</td></tr>
+                        <tr><td>Longest Loss Streak</td><td>${stats.longest_loss_streak}</td></tr>
+                    </table>
+                </div>
+
+                <div class="stats-section">
+                    <h3>Trade Log</h3>
+                    ${renderTradeLogTable(tradesWithCum)}
+                </div>
+            `;
+
+            drawEquityCurve(tradesWithCum);
+        }
+
+        function renderTradeLogTable(trades) {
+            if (!trades || trades.length === 0) return '<p style="color:var(--text-muted);font-size:13px">No resolved trades yet</p>';
+            return `<table class="stats-table">
+                <thead><tr>
+                    <th>Time</th><th>Coin</th><th>TF</th><th>Action</th><th>Entry</th><th>Result</th><th>ROI</th><th>Cum PnL</th>
+                </tr></thead>
+                <tbody>${trades.map(t => {
+                    const dt = new Date(t.signal_time * 1000);
+                    const time = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+                    const resultClass = t.result === 'WIN' ? 'win' : 'loss';
+                    const cumClass = t.cum_pnl >= 0 ? 'positive' : 'negative';
+                    return `<tr>
+                        <td>${time}</td>
+                        <td>${t.coin}</td>
+                        <td>${t.timeframe}</td>
+                        <td><span class="badge ${t.action === 'BUY_YES' ? 'bullish' : 'bearish'}">${t.action}</span></td>
+                        <td>${t.entry_pm_price != null ? t.entry_pm_price.toFixed(3) : '—'}</td>
+                        <td class="${resultClass}">${t.result}</td>
+                        <td class="${roiClass(t.roi)}">${formatRoi(t.roi)}</td>
+                        <td class="${cumClass}">${t.cum_pnl >= 0 ? '+' : ''}$${t.cum_pnl.toFixed(2)}</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>`;
+        }
+
+        function drawEquityCurve(trades) {
+            const canvas = document.getElementById('equityCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+            const W = rect.width;
+            const H = rect.height;
+
+            ctx.clearRect(0, 0, W, H);
+
+            if (!trades || trades.length === 0) {
+                ctx.fillStyle = '#6e7681';
+                ctx.font = '14px -apple-system, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data', W / 2, H / 2);
+                return;
+            }
+
+            // Build points: start at 0, then each trade's cum_pnl
+            const points = [0, ...trades.map(t => t.cum_pnl)];
+            const minY = Math.min(...points);
+            const maxY = Math.max(...points);
+            const rangeY = maxY - minY || 1;
+
+            const padL = 55, padR = 16, padT = 16, padB = 30;
+            const cW = W - padL - padR;
+            const cH = H - padT - padB;
+
+            // Grid lines
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 1;
+            const gridLines = 5;
+            ctx.font = '11px SF Mono, Monaco, monospace';
+            ctx.fillStyle = '#6e7681';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= gridLines; i++) {
+                const y = padT + (cH / gridLines) * i;
+                const val = maxY - (rangeY / gridLines) * i;
+                ctx.beginPath();
+                ctx.moveTo(padL, y);
+                ctx.lineTo(W - padR, y);
+                ctx.stroke();
+                ctx.fillText('$' + val.toFixed(2), padL - 6, y + 4);
+            }
+
+            // Zero line
+            if (minY < 0 && maxY > 0) {
+                const zeroY = padT + cH * (maxY / rangeY);
+                ctx.strokeStyle = '#30363d';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(padL, zeroY);
+                ctx.lineTo(W - padR, zeroY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Draw line
+            ctx.strokeStyle = points[points.length - 1] >= 0 ? '#3fb950' : '#f85149';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            for (let i = 0; i < points.length; i++) {
+                const x = padL + (i / (points.length - 1)) * cW;
+                const y = padT + cH * ((maxY - points[i]) / rangeY);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Fill under curve
+            const lastX = padL + cW;
+            const baseY = padT + cH * (maxY / rangeY);
+            ctx.lineTo(lastX, baseY);
+            ctx.lineTo(padL, baseY);
+            ctx.closePath();
+            const grad = ctx.createLinearGradient(0, padT, 0, H - padB);
+            const color = points[points.length - 1] >= 0 ? '63,185,80' : '248,81,73';
+            grad.addColorStop(0, `rgba(${color},0.25)`);
+            grad.addColorStop(1, `rgba(${color},0.02)`);
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            // X-axis labels (first, middle, last trade times)
+            if (trades.length > 0) {
+                ctx.fillStyle = '#6e7681';
+                ctx.textAlign = 'center';
+                ctx.font = '10px SF Mono, Monaco, monospace';
+                const indices = [0, Math.floor(trades.length / 2), trades.length - 1];
+                for (const idx of indices) {
+                    const t = trades[idx];
+                    const x = padL + ((idx + 1) / (points.length - 1)) * cW;
+                    const dt = new Date(t.signal_time * 1000);
+                    const label = (dt.getMonth()+1) + '/' + dt.getDate() + ' ' + dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+                    ctx.fillText(label, x, H - 6);
+                }
+            }
+        }
 
         connect();
         renderGrid();

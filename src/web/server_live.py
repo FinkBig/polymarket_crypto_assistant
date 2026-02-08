@@ -836,6 +836,16 @@ async def api_stats(
     return await db.async_get_stats(coin=coin, timeframe=timeframe, confidence=confidence)
 
 
+@app.get("/api/backtest")
+async def api_backtest(
+    coin: str | None = Query(None),
+    timeframe: str | None = Query(None),
+    confidence: str | None = Query(None),
+):
+    """Backtest data: chronological trades + aggregate stats."""
+    return await db.async_get_backtest(coin=coin, timeframe=timeframe, confidence=confidence)
+
+
 @app.get("/api/signals")
 async def api_signals(
     coin: str | None = Query(None),
