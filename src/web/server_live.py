@@ -53,6 +53,7 @@ def calculate_indicators(state: State) -> dict:
     vwap_v = ind.vwap(klines)
     ema_s, ema_l = ind.emas(klines)
     ha = ind.heikin_ashi(klines)
+    cvd_5m = ind.cvd(state.trades, 300)
 
     return {
         "obi": obi_v,
@@ -71,6 +72,7 @@ def calculate_indicators(state: State) -> dict:
         "ema_long": ema_l,
         "ema_cross": None if ema_s is None or ema_l is None else ("golden" if ema_s > ema_l else "death"),
         "ha_last": [c["green"] for c in ha[-config.HA_COUNT:]] if ha else [],
+        "cvd_5m": cvd_5m,
     }
 
 
@@ -341,7 +343,7 @@ async def start_feeds():
             kline_interval = config.TF_KLINE[tf]
             print(f"[{coin}/{tf}] Bootstrapping...")
             try:
-                await asyncio.get_event_loop().run_in_executor(
+                await asyncio.get_running_loop().run_in_executor(
                     None,
                     lambda s=symbol, i=kline_interval, st=state: bootstrap_sync(s, i, st)
                 )
