@@ -367,20 +367,22 @@ def serialize_all_data() -> dict:
                 seen = _logged_signals.setdefault(key, set())
                 if log_key not in seen:
                     seen.add(log_key)
+                    # Build coroutine eagerly to avoid closure-in-loop bug
+                    coro = db.async_log_signal(
+                        market_id=mid, coin=coin, timeframe=tf,
+                        action=recommendation["action"],
+                        confidence=recommendation.get("confidence"),
+                        reason=recommendation.get("reason"),
+                        price=state.pm_up if recommendation["action"] == "BUY_YES" else state.pm_dn,
+                        strike_price=strike, score=score, trend=trend,
+                        pm_up=state.pm_up, pm_dn=state.pm_dn,
+                        time_remaining=time_remaining,
+                        rsi=indicators.get("rsi"),
+                        macd_hist=indicators.get("macd_hist"),
+                        obi=indicators.get("obi"),
+                    )
                     asyncio.get_event_loop().call_soon_threadsafe(
-                        lambda: asyncio.ensure_future(db.async_log_signal(
-                            market_id=mid, coin=coin, timeframe=tf,
-                            action=recommendation["action"],
-                            confidence=recommendation.get("confidence"),
-                            reason=recommendation.get("reason"),
-                            price=state.pm_up if recommendation["action"] == "BUY_YES" else state.pm_dn,
-                            strike_price=strike, score=score, trend=trend,
-                            pm_up=state.pm_up, pm_dn=state.pm_dn,
-                            time_remaining=time_remaining,
-                            rsi=indicators.get("rsi"),
-                            macd_hist=indicators.get("macd_hist"),
-                            obi=indicators.get("obi"),
-                        ))
+                        lambda c=coro: asyncio.ensure_future(c)
                     )
 
             result[coin].append({
