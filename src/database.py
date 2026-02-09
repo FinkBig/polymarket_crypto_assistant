@@ -92,12 +92,17 @@ def init_db():
                 WHEN o.outcome IS NULL THEN NULL
                 WHEN (s.action = 'BUY_YES' AND o.outcome = 'UP')
                   OR (s.action = 'BUY_NO'  AND o.outcome = 'DOWN')
-                THEN ROUND((1.0 - COALESCE(
-                    CASE WHEN s.action = 'BUY_YES' THEN s.pm_up ELSE s.pm_dn END,
-                    0.5
-                )) / COALESCE(
-                    CASE WHEN s.action = 'BUY_YES' THEN s.pm_up ELSE s.pm_dn END,
-                    0.5
+                THEN ROUND(MIN(
+                    (1.0 - COALESCE(
+                        CASE WHEN s.action = 'BUY_YES' THEN s.pm_up ELSE s.pm_dn END,
+                        0.5
+                    )) / MAX(
+                        COALESCE(
+                            CASE WHEN s.action = 'BUY_YES' THEN s.pm_up ELSE s.pm_dn END,
+                            0.5
+                        ), 0.05
+                    ),
+                    19.0
                 ), 4)
                 ELSE -1.0
             END AS roi

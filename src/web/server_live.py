@@ -361,7 +361,10 @@ def serialize_all_data() -> dict:
 
             # ── Signal logging ──────────────────────────────────
             meta = market_meta.get((coin, tf), {})
-            if recommendation["action"] in ("BUY_YES", "BUY_NO") and meta.get("start"):
+            entry_price = state.pm_up if recommendation.get("action") == "BUY_YES" else state.pm_dn
+            if (recommendation["action"] in ("BUY_YES", "BUY_NO")
+                    and meta.get("start")
+                    and entry_price is not None and entry_price >= 0.05):
                 mid = _market_id(coin, tf, meta)
                 log_key = (mid, recommendation["action"])
                 seen = _logged_signals.setdefault(key, set())
